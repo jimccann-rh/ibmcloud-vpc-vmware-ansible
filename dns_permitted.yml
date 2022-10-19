@@ -1,0 +1,56 @@
+- name: DNS Permitted
+  block:
+    - name: "Check DNS Permitted {{ item }}"
+      ibm_dns_permitted_networks_info:
+        instance_id: "{{ dns_output.resource.guid }}"
+        zone_id: "{{ vars['dns_zone_' + item | replace('.','_')].zone_id }}" 
+      failed_when:
+        - dns_permitted_output.resource.dns_permitted_networks[0].state != "ACTIVE"
+      register: dns_permitted_output
+
+#    - pause:
+
+#    - name: Set fact found to default false 
+#      ansible.builtin.set_fact:
+#        found: false
+#
+#    - name: Set fact found to true if dns zone is found
+#      ansible.builtin.set_fact:
+#        found: true
+#      when: item in loop_zones.name
+#      loop: "{{ dns_permitted_output.resource.dns_permitteds }}"
+#      loop_control:
+#        loop_var: loop_zones
+#
+#    - name: Fail if dns zone is NOT found
+#      ansible.builtin.fail:
+#      when: not found|bool 
+
+    - name: "Save existing DNS Permitted {{ item }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "dns_permitted_{{ item | replace('.','_') }}": "{{ dns_permitted_output.resource }}"
+      when: dns_permitted_output.resource.id is defined and found|bool
+
+  rescue:
+    - name: "Create DNS Permitted {{ item }}"
+      ibm_dns_permitted_network:
+        type: "vpc"
+        vpc_crn: "{{ vpc.crn }}"
+        instance_id: "{{ dns_output.resource.guid }}"
+#        zone_id: '{{"dns_zone_" +item | replace(".","_").id }}'
+        zone_id: "{{ vars['dns_zone_' + item | replace('.','_')].zone_id }}" 
+      when: '"dns_permitted_" +item'
+      register: dns_permitted_create_output
+
+    - name: "Save existing DNS Permitted {{ item }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "dns_permitted_{{ item | replace('.','_') }}": "{{ dns_permitted_create_output.resource }}"
+      when: dns_permitted_create_output.resource.id is defined
+
+  always:
+    - name: "Print DNS Permitted info {{ item }}"
+      ansible.builtin.debug:
+        msg:
+          - "{{ vars['dns_permitted_' + item | replace('.','_')] }}"

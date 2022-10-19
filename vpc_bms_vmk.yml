@@ -1,0 +1,77 @@
+- name: "Save existing VPC BMS {{ item[0] }} info as fact"
+  ansible.builtin.set_fact:
+    cacheable: true
+    bare_metal_host_name: "{{ vpc_bms_name }}{{ '%02x' | format(item[0]) }}"
+
+- name: VPC BMS vmk nics
+  block:
+    - name: "Check VPC BMS vmk {{ item[1]['name'] }} ** {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server_network_interfaces_info:
+        bare_metal_server: "{{ vars['vpc_bms_' + item[0] | string ].id }}"
+      register: vpc_bms_nic_output
+
+
+    - debug:
+        msg:
+          - "{{ loop_vmk.name }}"
+      loop: "{{ vpc_bms_nic_output.resource.network_interfaces }}"
+      loop_control:
+        loop_var: loop_vmk
+
+
+    - name: Set fact found to default false
+      ansible.builtin.set_fact:
+        found: false
+
+    - name: Set fact found to true if vmk is found
+      ansible.builtin.set_fact:
+        found: true
+      when: 'item[1]["name"] in loop_vmk.name'
+      loop: "{{ vpc_bms_nic_output.resource.network_interfaces }}"
+      loop_control:
+        loop_var: loop_vmk
+
+    - name: Fail if vmk is NOT found
+      ansible.builtin.fail:
+      when: not found|bool
+
+    - name: "Save existing VPC BMS vmk {{ item[0] }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        'vpc_bms_nic_{{ item[1]["name"] | replace("-","_") }}': "{{ loop_vmk }}"
+      when:
+        - vpc_bms_nic_output.resource.id is defined
+        - found|bool
+        - 'item[1]["name"] in loop_vmk.name'
+      loop: "{{ vpc_bms_nic_output.resource.network_interfaces }}"
+      loop_control:
+        loop_var: loop_vmk
+
+  rescue:
+    - name: "Create VPC BMS vmk {{ item[1]['name'] }} ** {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server_network_interface:
+        bare_metal_server: "{{ vars['vpc_bms_' + item[0] | string ].id }}"
+        subnet: '{{ item[1]["subnet"] }}'
+        name: '{{ item[1]["name"] }}'
+        vlan: '{{ item[1]["vlan"] }}'
+        security_groups: ["{{ vpc_security_group.id }}"]
+        allow_interface_to_float: '{{ item[1]["float"] }}'
+      register: vpc_bms_nic_create_output
+
+    - name: "Save existing VPC BMS vmk {{ item[1]['name'] }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        'vpc_bms_nic_{{ item[1]["name"] | replace("-","_") }}': "{{ vpc_bms_nic_create_output.resource }}"
+      when: vpc_bms_nic_create_output.resource.id is defined
+
+  always:
+
+    - name: 'Print VPC BMS vmk info {{ item[1]["name"] }}'
+      ansible.builtin.debug:
+        msg:
+          - "{{ vars['vpc_bms_nic_' +  item[1]['name'] | replace('-','_') | string ] }}"
+
+- name: 'Save VPC BMS nic ip info {{ item[1]["name"] }}'
+  copy:
+    content: "{{ vars['vpc_bms_nic_' +  item[1]['name'] | replace('-','_') | string ].primary_ip[0].address }}"
+    dest: "/{{ dir_location }}/{{ bare_metal_host_name }}-{{ item[1]['name'] }}-ip.txt"

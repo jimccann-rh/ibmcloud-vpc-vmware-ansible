@@ -1,0 +1,39 @@
+- name: VPC Subnet
+  block:
+    - name: "Check VPC Subnet {{ item.name }}"
+      ibm_is_subnet_info:
+        name: "{{ vpc_subnet_name }}-{{ item.name }}"
+      failed_when:
+        - 'vpc_subnet_name +"-" +item.name not in vpc_subnet_output.resource.name'
+      register: vpc_subnet_output
+
+    - name: "Save existing VPC Subnet {{ item.name }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "vpc_subnet_{{ item.name }}": "{{ vpc_subnet_output.resource }}"
+      when: vpc_subnet_output.resource.id is defined
+
+  rescue:
+    - name: "Create VPC Subnet {{ item.name }}"
+      ibm_is_subnet:
+        vpc: "{{ vpc.id }}"
+        resource_group: "{{ resource_group.id }}"
+        name: "{{ vpc_subnet_name }}-{{ item.name }}"
+        zone: "{{ vpc_zone_name }}"
+        ipv4_cidr_block: "{{ item.ip }}"
+        network_acl: "{{ vpc_network_acl.id }}"
+      register: vpc_subnet_create_output
+      when: vars['vpc_subnet_' + item.name] is not defined
+
+    - name: "Save existing VPC Subnet {{ item.name }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "vpc_subnet_{{ item.name }}": "{{ vpc_subnet_create_output.resource }}"
+      when: vpc_subnet_create_output.resource.id is defined
+
+  always:
+    - name: "Print VPC Subnet info {{ item }}"
+      ansible.builtin.debug:
+        msg:
+          - "vpc_subnet_{{ item.name }}"
+          - "{{ vars['vpc_subnet_' + item.name] }}"

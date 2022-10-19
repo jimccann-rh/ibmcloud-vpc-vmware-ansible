@@ -1,0 +1,44 @@
+- name: VPC Network ACL Rule
+  block:
+    - name: "Check VPC Network ACL Rule {{ item }}"
+      ibm_is_network_acl_rule_info:
+        network_acl: "{{ vpc_network_acl.id }}"
+        name: "{{ vpc_network_acl_name }}-rule-icmp-{{ item }}"
+      failed_when:
+        - 'vpc_network_acl_name +"-rule-icmp-" +item not in vpc_network_acl_rule_output.resource.name'
+      register: vpc_network_acl_rule_output
+
+    - name: "Save existing VPC Network ACL Rule {{ item }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "vpc_network_acl_rule_{{ item }}": "{{ vpc_network_acl_rule_output.resource }}"
+      when: vpc_network_acl_rule_output.resource.id is defined
+
+  rescue:
+    - name: "Create VPC Network ACL Rule ICMP {{ item }}"
+      ibm_is_network_acl_rule:
+        network_acl: "{{ vpc_network_acl.id }}"
+        id: "{{  resource_group.id }}"
+        name: "{{ vpc_network_acl_name }}-rule-icmp-{{ item }}"
+        action: allow
+        direction: "{{ item }}"
+        source: 0.0.0.0/0
+        destination: 0.0.0.0/0
+        icmp:
+          - code: 
+            type: 
+      register: vpc_network_acl_rule_create_output
+      when: '"vpc_network_acl_rule_" +item' 
+
+    - name: "Save existing VPC Network ACL Rule {{ item }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "vpc_network_acl_rule_{{ item }}": "{{ vpc_network_acl_rule_create_output.resource }}"
+      when: vpc_network_acl_rule_create_output.resource.id is defined
+
+  always:
+    - name: "Print VPC Network ACL Rule info {{ item }}"
+      ansible.builtin.debug:
+        msg:
+          - "vpc_network_acl_rule_{{ item }}"
+          - "{{ vars['vpc_network_acl_rule_' + item] }}"

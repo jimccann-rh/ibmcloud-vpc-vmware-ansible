@@ -1,0 +1,11 @@
+# enable & start SSH
+vim-cmd hostsvc/enable_ssh
+vim-cmd hostsvc/start_ssh
+# enable & start ESXi Shell
+vim-cmd hostsvc/enable_esx_shell
+vim-cmd hostsvc/start_esx_shell
+# Attempting to set the hostname
+esxcli system hostname set --fqdn={{ bare_metal_host_name }}.{{ dns_zone_name }}
+echo '{{ ssh_public_key }}' > /etc/ssh/keys-root/authorized_keys
+esxcli network ip set --ipv6-enabled=false
+esxcli system settings advanced set -o /UserVars/SuppressShellWarning -i 1

@@ -1,0 +1,1014 @@
+---
+- name: IBMC VPC
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  environment:
+    IC_REGION: "{{ vpc_region }}"
+    IC_API_KEY: "{{ lookup('ansible.builtin.env', 'IBMCLOUD_API_KEY') }}" 
+#    IC_API_KEY: "{{ vpc_key }}"
+  collections:
+    - ibm.cloudcollection
+    - community.general
+
+  tasks:
+    - name: Fetch the variables from var file
+      ansible.builtin.include_vars:
+        file: vars.yml
+
+    - name: Create resource Group
+      ibm_resource_group:
+        name: "{{ resource_group_name }}"
+      register: rg_create_output
+
+    - name: Save newly created resource group info as fact
+      ansible.builtin.set_fact:
+        cacheable: true
+        resource_group: "{{ rg_create_output.resource }}"
+      when: rg_create_output.resource.id is defined
+
+    - name: Print Resource group info
+      ansible.builtin.debug:
+        msg: "Resource Group : {{ resource_group }}"
+
+
+
+#    - name: "Check {{ cos_name }} Exists"
+#      ibm_resource_instance:
+#        name: "{{ cos_name }}"
+#        plan: "{{ cos_plan }}"
+#        service: "{{ cos_service }}"
+#        resource_group_id: "{{ resource_group.id }}"
+#        location: "{{ vpc_region }}" 
+#      register: cos_output
+#
+#    - name: Print cos info
+#      ansible.builtin.debug:
+#        msg:
+#          - "COS : {{ cos_output }}"
+#
+#    - name: Create resource COS
+#      ibm_cos_bucket:
+#        bucket_name: "{{ cos_bucket_name }}"
+#        resource_instane_id: "{{ cos_output.resource.id }}"
+#        region_location: "{{ vpc_region }}"
+#        storage_class: "{{ cos_class }}"
+#      register: cos_create_output
+#
+#    - name: Save newly created resource group info as fact
+#      ansible.builtin.set_fact:
+#        cacheable: true
+#        cos_bucket: "{{ cos_create_output.resource }}"
+#      when: cos_create_output.resource.id is defined
+#
+#    - name: Print Resource group info
+#      ansible.builtin.debug:
+#        msg: "cos bucket : {{ cos_bucket }}"
+
+
+
+    - name: VPC Exists
+      block:
+        - name: Check VPC Exists
+          ibm_is_vpc_info:
+            name: "{{ vpc_name }}"
+          failed_when:
+            - vpc_output.rc != 0
+            - '"VPCDoesnotExist" not in vpc_output.stderr'
+          register: vpc_output
+
+        - name: Save existing VPC info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc: "{{ vpc_output.resource }}"
+            vpc_sg_ri: "{{ vpc_output.resource.security_group  | selectattr('group_name', 'match', vpc_security_group_name ) }}"
+          when: vpc_output.resource.id is defined
+
+        - name: Save newly created vpc info as fact SG
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_sg_ri_port: "{{ vpc.security_group[0]['rules'][0]['rule_id'] }} {{ vpc.security_group[0]['rules'][0]['port_min'] }}"
+#          when: vpc_sg_ri[0].rules is defined 
+          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
+
+      rescue:
+        - name: Create VPC
+          ibm_is_vpc:
+            name: "{{ vpc_name }}"
+            resource_group: "{{ resource_group.id }}"
+          register: vpc_create_output
+          when: vpc is not defined
+
+        - name: Save newly created vpc info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc: "{{ vpc_create_output.resource }}"
+            vpc_sg_ri: "{{ vpc_create_output.resource.security_group | selectattr('group_name', 'match', vpc_security_group_name ) }}"
+          when: vpc_create_output.resource.id is defined
+
+        - name: Save newly created vpc info as fact SG
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_sg_ri_port: "{{ vpc.security_group[0]['rules'][0]['rule_id'] }} {{ vpc.security_group[0]['rules'][0]['port_min'] }}"
+          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
+
+      always:
+
+        - name: Print VPC info
+          ansible.builtin.debug:
+            msg:
+              - "VPC : {{ vpc }}"
+
+        - name: Print VPC info SG ***
+          ansible.builtin.debug:
+            msg:
+              - "VPC CRN : {{ vpc.crn }}"
+              - "VPC SG LIST : {{ vpc.security_group | list }}"
+              - "VPC SG : {{ vpc.security_group[0] }}"
+              - "VPC SG RI : {{ vpc_sg_ri_port }}"
+          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
+
+        - name: Print VPC info
+          ansible.builtin.debug:
+            msg: "{{ (item.rules  | selectattr('direction', 'match', 'inbound' ) | first).rule_id }}"
+          loop: "{{ vpc_sg_ri }}"
+          when: vpc_sg_ri_port is defined and vpc_sg_ri_port | length > 0
+
+
+        - name: Save newly created vpc info as fact sg inbound
+          ansible.builtin.set_fact:
+            cacheable: true
+            sg_inbound: "{{ (item.rules  | selectattr('direction', 'match', 'inbound' ) | first).rule_id }}"
+          loop: "{{ vpc_sg_ri }}"
+          when: vpc_sg_ri_port is defined and vpc_sg_ri_port | length > 0
+
+
+    - name: VPC address prefixes
+      block:
+        - name: Check VPC address prefixes
+          ibm_is_vpc_address_prefixes_info:
+            vpc: "{{ vpc.id }}"
+            name: "{{ vpc_prefix_name }}"
+          failed_when:
+            - vpc_address_prefixes_output.rc != 0
+            - '"VPCAdressPrefixDoesnotExist" not in vpc_adddress_prefixes_output.stderr'
+          register: vpc_address_prefixes_output
+
+        - name: Save existing VPC address prefixes info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_address_prefix: "{{ vpc_address_prefixes_output.resource }}"
+          when: vpc_address_prefixes_output.resource.id is defined
+
+      rescue:
+        - name: Create VPC address prefix
+          ibm_is_vpc_address_prefix:
+            vpc: "{{ vpc.id }}"
+            name: "{{ vpc_prefix_name }}"
+            zone: "{{ vpc_zone_name }}"
+            cidr: "{{ vpc_prefix_cidr }}"
+          register: vpc_address_prefix_create_output
+          when: vpc_address_prefix is not defined
+
+        - name: Save newly created vpc address prefix info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_address_prefix: "{{ vpc_address_prefix_create_output }}"
+          when: vpc_address_prefix_create_output.resource.id is defined
+
+      always:
+        - name: Print VPC address prefix info
+          ansible.builtin.debug:
+            msg:
+              - "VPC address prefix : {{ vpc_address_prefix }}"
+
+    - name: VPC Network ACL
+      block:
+        - name: Check VPC Network ACL
+          ibm_is_network_acl_info:
+            vpc_name: "{{ vpc_name }}"
+            name: "{{ vpc_network_acl_name }}"
+          failed_when:
+            - vpc_network_acl_output.rc != 0
+            - '"VPCNetworkACLDoesnotExist" not in vpc_network_acl_output.stderr'
+          register: vpc_network_acl_output
+
+        - name: Save existing VPC Network ACL info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_network_acl: "{{ vpc_network_acl_output.resource }}"
+          when: vpc_network_acl_output.resource.id is defined
+
+      rescue:
+        - name: Create VPC Network ACL
+          ibm_is_network_acl:
+            vpc: "{{ vpc.id }}"
+            name: "{{ vpc_network_acl_name }}"
+            resource_group: "{{  resource_group.id }}"
+          register: vpc_network_acl_create_output
+          when: vpc_network_acl is not defined
+
+        - name: Save newly created vpc address prefix info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_network_acl: "{{ vpc_network_acl_create_output.resource }}"
+          when: vpc_network_acl_create_output.resource.id is defined
+
+      always:
+        - name: Print VPC Network ACL info
+          ansible.builtin.debug:
+            msg:
+              - "VPC Network ACL : {{ vpc_network_acl }}"
+      
+#    - pause:
+#        seconds: 60 
+
+    - name: VPC Network ACL Rule 
+      include_tasks: vpc_network_acl_rule_all.yml
+#      include_tasks: vpc_network_acl_rule_icmp.yml
+      loop:
+        - inbound
+        - outbound
+      
+        
+
+    - name: VPC Security Group
+      block:
+        - name: Check VPC Security Group Exists
+          ibm_is_security_group_info:
+            name: "{{ vpc_security_group_name }}"
+          failed_when:
+            - vpc_security_group_output.rc != 0
+            - '"SecurityGroupDoesnotExist" not in vpc_security_group_output.stderr'
+          register: vpc_security_group_output
+
+        - name: Save existing VPC Security Group info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_security_group: "{{ vpc_security_group_output.resource }}"
+          when: vpc_security_group_output.resource.id is defined
+
+      rescue:
+        - name: Create VPC Security Group
+          ibm_is_security_group:
+            name: "{{ vpc_security_group_name }}"
+            vpc: "{{ vpc.id }}"
+            resource_group: "{{ resource_group.id }}"
+          register: vpc_security_group_create_output
+          when: vpc_security_group is not defined
+
+        - name: Save newly created vpc Security Group info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_security_group: "{{ vpc_security_group_create_output.resource }}"
+          when: vpc_security_group_create_output.resource.id is defined
+
+      always:
+        - name: Print VPC Security Group info
+          ansible.builtin.debug:
+            msg:
+              - "VPC : {{ vpc_security_group }}"
+
+    - name: VPC Subnet
+      include_tasks: vpc_subnet.yml
+      loop:
+        - { name: "mgmt", ip: "{{ vpc_mgmt_ip }}" }
+        - { name: "host", ip: "{{ vpc_host_ip }}" }
+        - { name: "vmot", ip: "{{ vpc_vmot_ip }}" }
+        - { name: "vsan", ip: "{{ vpc_vsan_ip }}" }
+
+    - name: VPC Gateway
+      block:
+        - name: Check VPC Gateway Exists
+          ibm_is_public_gateway_info:
+            name: "{{ vpc_public_gateway_name }}"
+          failed_when:
+            - vpc_public_gateway_output.rc != 0
+            - '"VPCPublicGatewayDoesnotExist" not in vpc_public_gateway_output.stderr'
+          register: vpc_public_gateway_output
+
+        - name: Save existing VPC Gateway info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_public_gateway: "{{ vpc_public_gateway_output.resource }}"
+          when: vpc_public_gateway_output.resource.id is defined
+
+      rescue:
+        - name: Create VPC Gateway
+          ibm_is_public_gateway:
+            name: "{{ vpc_public_gateway_name }}"
+            vpc: "{{ vpc.id }}"
+            resource_group: "{{ resource_group.id }}"
+            zone: "{{ vpc_zone_name }}"
+          register: vpc_public_gateway_create_output
+          when: vpc_public_gateway is not defined
+
+        - name: Save newly created vpc Gateway info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_public_gateway: "{{ vpc_public_gateway_create_output.resource }}"
+          when: vpc_public_gateway_create_output.resource.id is defined
+
+      always:
+        - name: Print VPC Gateway info
+          ansible.builtin.debug:
+            msg:
+              - "VPC Gateway : {{ vpc_public_gateway }}"
+      
+
+    - name: VPC Gateway Attachment
+      block:
+        - name: Create VPC Gateway Attachment
+          ibm_is_subnet_public_gateway_attachment:
+            public_gateway: "{{ vpc_public_gateway.id }}"
+            subnet: "{{ vars['vpc_subnet_' + vpc_subnet_public_gateway_attachment_name ].id }}"
+          register: vpc_subnet_public_gateway_attachment_output
+          changed_when: false # this is for know issue with attachment module
+
+      rescue:
+        - name: Pause for VPC Gateway creation
+          ansible.builtin.pause:
+            minutes: 2 
+
+        - name: Create VPC Gateway Attachment
+          ibm_is_subnet_public_gateway_attachment:
+            public_gateway: "{{ vpc_public_gateway.id }}"
+            subnet: "{{ vars['vpc_subnet_' + vpc_subnet_public_gateway_attachment_name ].id }}"
+          register: vpc_subnet_public_gateway_attachment_output 
+
+      always:
+        - name: Print VPC Gateway Attachment info
+          ansible.builtin.debug:
+            msg:
+              - "VPC Gateway Attchment : {{ vpc_subnet_public_gateway_attachment_output.stdout_lines }}"
+      
+
+    - name: SSH Key Exists
+      block:
+        - name: Checking for existing SSH key
+          ibm_is_ssh_key_info:
+            name: "{{ vpc_ssh_key_name }}"
+          failed_when:
+            - vpc_ssh_key_output.rc != 0
+            - '"No SSH Key found" in vpc_ssh_key_output.stderr'
+          register: vpc_ssh_key_output
+
+        - name: Save newly created ssh pulbic key fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            ssh_public_key: "{{ lookup('file', '/{{ dir_location }}/{{ vpc_ssh_key_name }}.pub') }}"
+          when: vpc_ssh_key_output is defined
+
+        - name: Save existing SSH Key info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_ssh_key: "{{ vpc_ssh_key_output.resource }}"
+          when: vpc_ssh_key_output is defined
+
+      rescue:
+        - name: Generate an OpenSSH keypair with the default values (4096 bits, rsa)
+          community.crypto.openssh_keypair:
+            path: "{{ dir_location }}/{{ vpc_ssh_key_name }}"
+          when: vpc_ssh_key is not defined
+    
+        - name: Save newly created ssh pulbic key fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            ssh_public_key: "{{ lookup('file', '/{{ dir_location }}/{{ vpc_ssh_key_name }}.pub') }}"
+          when: vpc_ssh_key is not defined
+
+        - name: Configure SSH Key
+          ibm_is_ssh_key:
+            name: "{{ vpc_ssh_key_name }}"
+            public_key: "{{ ssh_public_key.split()[:2]|join(' ') }}"
+            id: "{{ ssh_key.resource.id | default(omit) }}"
+            resource_group: "{{ resource_group.id }}"
+          register: vpc_ssh_key_create_output
+          when: vpc_ssh_key is not defined
+
+        - name: Save newly created SSH Key info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vpc_ssh_key: "{{ vpc_ssh_key_create_output.resource }}"
+          when: vpc_ssh_key_create_output is defined
+
+      always:
+        - name: Print SSH Key info
+          ansible.builtin.debug:
+            msg:
+              - "VPC SSH Key : {{ vpc_ssh_key }}"
+      
+
+    - name: Get Images info
+      ibm_is_images_info:
+      register: images_list
+
+#    - name: Get images info
+#      ansible.builtin.debug:
+#        var: images_list.resource.images |
+#             items2dict(key_name='name', value_name='id')
+#
+#    - name: Get Profiles info
+#      ibm_is_instance_profiles_info:
+#      register: instance_profiles_list
+#
+#    - name: Get Profiles info
+#      ansible.builtin.debug:
+#        var: instance_profiles_list.resource.profiles | list
+# 
+#    - name: "Get specific image resource info for {{ vsi_jump_image }}"
+#      ansible.builtin.debug:
+#        var: images_list.resource.images | selectattr('name', 'match', vsi_jump_image ) | list 
+
+    - name: Save newly image selection info as fact
+      ansible.builtin.set_fact:
+        cacheable: true
+        vsi_image: "{{ images_list.resource.images | selectattr('name', 'match', vsi_jump_image ) }}" 
+
+    - name: Save newly image selection info as fact
+      ansible.builtin.debug:
+        msg: "{{ vsi_image[0].id }}"
+
+    - name: Set VSI VM image name/id dictionary fact
+      ansible.builtin.set_fact:
+        image_dict: "{{ images_list.resource.images |
+                        items2dict(key_name='name', value_name='id') }}"
+
+    - name: VSI Jump box
+      block:
+        - name: Check VSI Jump box Exists
+          ibm_is_instance_info:
+            name: "{{ vsi_jump_name }}"
+          failed_when:
+            - vsi_jump_output.rc != 0
+            - '"No Instance found" in vsi_jump_output.stderr'
+          register: vsi_jump_output
+
+        - name: Save existing VSI Jump box info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vsi_jump: "{{ vsi_jump_output.resource }}"
+          when: vsi_jump_output.resource.id is defined
+
+      rescue:
+        - name: Create VSI Jump Box
+          ibm_is_instance:
+            #id: "{{ vsi_jump.id | default(omit) }}"
+            name: "{{ vsi_jump_name }}"
+            vpc: "{{ vpc.id }}"
+            resource_group: "{{ resource_group.id }}"
+            zone: "{{ vpc_zone_name }}"
+            profile: "{{ vsi_profile }}"
+            image: "{{ image_dict[vsi_jump_image] }}"
+            keys:
+             - "{{ vpc_ssh_key.id }}"
+            primary_network_interface:
+             - subnet: "{{ vars['vpc_subnet_' + vpc_subnet_public_gateway_attachment_name ].id }}"
+               name: "eth0"
+               security_groups: ["{{ vpc_security_group.id }}"]
+          register: vsi_jump_create_output
+          when: vsi_jump is not defined
+
+        - name: Save newly created vsi jump box info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vsi_jump: "{{ vsi_jump_create_output.resource }}"
+          when: vsi_jump_create_output.resource.id is defined
+
+      always:
+        - name: Print VSI Jump box info
+          ansible.builtin.debug:
+            msg:
+              - "VSI Jump Box : {{ vsi_jump }}"
+
+
+    - name: VSI Jump box IP
+      block:
+        - name: Check VSI Jump box IP Exists
+          ibm_is_floating_ip_info:
+            name: "{{ vsi_jump_name_ip }}"
+          failed_when:
+            - vsi_jump_ip_output.rc != 0
+            - '"No floatingIP" in vsi_jump_ip_output.stderr'
+          register: vsi_jump_ip_output
+
+        - name: Save existing VSI Jump box info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vsi_jump_ip: "{{ vsi_jump_ip_output.resource }}"
+          when: vsi_jump_ip_output.resource.id is defined
+
+      rescue:
+        - name: Create VSI Jump Box IP
+          ibm_is_floating_ip:
+            name: "{{ vsi_jump_name_ip }}"
+            resource_group: "{{ resource_group.id }}"
+            target: "{{ vsi_jump.primary_network_interface[0]['id'] }}"
+          register: vsi_jump_ip_create_output
+          when: vsi_jump_ip is not defined
+
+        - name: Save newly created vsi jump box info as fact
+          ansible.builtin.set_fact:
+            cacheable: true
+            vsi_jump_ip: "{{ vsi_jump_ip_create_output.resource }}"
+          when: vsi_jump_ip_create_output.resource.id is defined
+
+      always:
+        - name: Print VSI Jump box IP address info
+          ansible.builtin.debug:
+            msg:
+              - "VPC Jump Box IP address : {{ vsi_jump_ip }}"
+
+        - name: 'Save VPC VSI nic external ip info {{ vsi_jump_name }}_ext'
+          copy:
+            content: "{{ vsi_jump_ip.address }}"
+            dest: "/{{ dir_location }}/{{ vsi_jump_name }}-{{ vpc_name }}-ext-ip.txt"
+          delegate_to: localhost
+ 
+        
+
+    - name: VPC Network Security Group
+      include_tasks: 'vpc_security_group_{{ item.protocol}}.yml'
+      loop:
+        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 22, port_min: 22 }
+        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 443, port_min: 443 }
+        - { protocol: "all", direction: "outbound", remote: "0.0.0.0/0" }
+      when: sg_inbound is not defined
+#          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
+
+    - name: "Check {{ dns_domain_name }} Exists"
+      ibm_resource_instance:
+        name: "{{ dns_domain_name }}"
+        plan: "{{ dns_plan }}"
+        service: "dns-svcs"
+        resource_group_id: "{{ resource_group.id }}"
+        location: "global"
+      register: dns_output
+
+    - name: Print dns info
+      ansible.builtin.debug:
+        msg:
+          - "DNS : {{ dns_output }}"
+
+    - name: DNS Zone 
+      include_tasks: dns_zone.yml
+      loop:
+        - "{{ dns_zone_name }}"
+
+    - name: DNS Permitted Network
+      include_tasks: dns_permitted.yml
+      loop:
+        - "{{ dns_zone_name }}"
+
+    - name: DNS Records
+      include_tasks: dns_record.yml
+      loop:
+        - { name: "{{ vsi_jump_name }}", type: "A", rdata: "{{ vsi_jump.primary_network_interface[0].primary_ipv4_address }}", zone_id: "{{ vars['dns_zone_' + dns_zone_name | replace('.','_')].zone_id }}", instance_id: "{{ dns_output.resource.guid }}" }
+      
+    - name: VPC BMS
+      include_tasks: vpc_bms.yml
+      loop_control:
+        loop_var: loop_bms
+#        extended: yes
+      loop: "{{ range(0, bms_count + 1, 1) | list }}"
+
+    - name: VPC BMS vmk interface
+      include_tasks: vpc_bms_vmk.yml
+      with_nested: 
+        - "{{ range(0, bms_count + 1, 1) | list }}"
+        - "{{ _vmk }}"
+      vars:
+        _vmk: 
+          - { name: "{{ bms_interface_vmk1 }}", vlan: "{{ bms_vmot_vlan }}", subnet: "{{ vars['vpc_subnet_vmot'].id }}", float: "false" }
+          - { name: "{{ bms_interface_vmk2 }}", vlan: "{{ bms_vsan_vlan }}", subnet: "{{ vars['vpc_subnet_vsan'].id }}", float: "false" }
+
+    - name: Add a host alias
+      ansible.builtin.add_host:
+        hostname: "{{ item.name }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_ssh_private_key_file: "{{ dir_location }}/{{ vpc_ssh_key_name }}"
+        ansible_user: "root"
+#        ansible_ssh_extra_args: "-o StrictHostKeyChecking=no"
+        groups: "jumplist_{{ item.network }}"
+      loop:
+        - { name: "{{ vsi_jump_name }}_ext", ip: "{{ vsi_jump_ip.address }}", network: "external" }
+        - { name: "{{ vsi_jump_name }}", ip: "{{ vsi_jump.primary_network_interface[0].primary_ipv4_address }}", network: "internal" }
+
+
+
+- name: IBMC VPC esx
+  hosts: esxhosts
+  vars_files:
+    - vars.yml
+  gather_facts: false
+
+  collections:
+    - community.general
+    - community.vmware
+
+  tasks:
+    - name: Wait for system to become reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 3600
+
+    - ping:
+
+
+- name: IBMC VPC jump box
+  hosts: jumplist_external
+  vars_files:
+    - vars.yml
+  gather_facts: false
+  collections:
+    - community.general
+    - community.vmware
+  tasks:
+
+    - name: Wait for system to become reachable
+      ansible.builtin.wait_for_connection:
+
+    - name: Gather facts for first time
+      ansible.builtin.setup:
+
+    - name: Add repository - Microsoft
+      ansible.builtin.yum_repository:
+        name: microsoft
+        description: Microsoft Repository
+        baseurl: https://packages.microsoft.com/rhel/7/prod/
+        gpgkey: https://packages.microsoft.com/keys/microsoft.asc
+        gpgcheck: true
+        enabled: true
+
+    - name: Install epel-release
+      ansible.builtin.yum:
+        name:
+          - epel-release
+        state: latest
+        update_cache: true
+
+    - name: Install Packages
+      ansible.builtin.yum:
+        name:
+          - powershell
+          - git
+          - rsync
+          - bind-utils
+          - jq
+          - wget
+          - python-netaddr
+          - python-ipaddr
+          - python36-pyvmomi
+          - python2-pyvmomi
+#          - python3-pip
+        state: latest
+        update_cache: true
+
+
+
+    - name: Add Management Network VM Portgroup pg-mgmt
+      community.vmware.vmware_portgroup:
+        hostname: "{{ hostvars[item].ansible_host }}"
+        username: "{{ hostvars[item].ansible_user }}"
+        password: "{{ hostvars[item].ansible_password }}"
+        switch: "vSwitch0"
+        portgroup: "pg-mgmt"
+        vlan_id: "{{ bms_mgmt_vlan }}"
+        hosts: ["{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}"]
+        validate_certs: no
+      loop: '{{ groups["esxhosts"] }}'
+      no_log: true
+
+
+    - name: Add Management Network VM Portgroup pg-vmon
+      community.vmware.vmware_portgroup:
+        hostname: "{{ hostvars[item].ansible_host }}"
+        username: "{{ hostvars[item].ansible_user }}"
+        password: "{{ hostvars[item].ansible_password }}"
+        switch: "vSwitch0"
+        portgroup: "pg-vmon"
+        vlan_id: "{{ bms_vmot_vlan }}"
+        hosts: ["{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}"]
+        validate_certs: no
+      loop: '{{ groups["esxhosts"] }}'
+      no_log: true
+
+    - name: execute ipnm script
+      ansible.builtin.script: 'files/ipnm.py {{ vpc_vmot_ip }}'
+      register: vmot_netmask
+
+    - debug:
+        msg: "{{ vmot_netmask }}"
+
+    - debug:
+        msg: "{{ _vmotion }}"
+      loop: '{{ groups["esxhosts"] }}'
+      vars:
+        _vmotion: "{{ lookup('file', '{{ dir_location }}/{{ hostvars[item].inventory_hostname }}-vlan-nic-vmotion-vmk2-ip.txt') }}"
+ 
+    - name: 'Add vMotion vmkernel port with vMotion TCP/IP stack'
+      community.vmware.vmware_vmkernel:
+        hostname: "{{ hostvars[item].ansible_host }}"
+        username: "{{ hostvars[item].ansible_user }}"
+        password: "{{ hostvars[item].ansible_password }}"
+        esxi_hostname: "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}"
+        portgroup_name: "pg-vmon"
+        vswitch_name: vSwitch0
+#        device: vmk2
+#        mtu: 9000
+        network:
+          type: 'static'
+          ip_address: "{{ _vmotion }}" 
+          subnet_mask: "{{ vmot_netmask.stdout | trim }}"
+          tcpip_stack: vmotion
+        state: present
+        validate_certs: no
+      loop: '{{ groups["esxhosts"] }}'
+      vars:
+        _vmotion: "{{ lookup('file', '{{ dir_location }}/{{ hostvars[item].inventory_hostname }}-vlan-nic-vmotion-vmk2-ip.txt') }}"
+      no_log: true
+
+    - name: Is powercli installed?
+      ansible.builtin.stat:
+        path: '{{ ansible_env.HOME }}/.local/share/powershell/Modules/VMware.PowerCLI'
+      register: pcliinstalled
+
+    - name: Run a pwsh command install PowerCLI
+      ansible.builtin.command: 'pwsh -Command Install-Module -Name VMware.PowerCLI -Force | ConvertTo-Json'
+      register: result
+      when: not pcliinstalled.stat.exists
+
+    - name: "test resolving {{ vsi_jump_name }}.{{ dns_zone_name }}"
+      ansible.builtin.command:
+        cmd: "nslookup {{ vsi_jump_name }}.{{ dns_zone_name }}"
+      changed_when: False
+
+#    - name: 'Save VPC VSI nic external ip info {{ vsi_jump_name }}_ext'
+#      copy:
+#        content: "{{ vsi_jump_ip.address }}"
+#        dest: "/{{ dir_location }}/{{ vsi_jump_name }}-{{ vpc_name }}-ext-ip.txt"
+#      delegate_to: localhost
+
+#    - name: 'Create directory {{ vpc_name }} in user home directory'
+#      ansible.builtin.file:
+#        path: '{{ ansible_env.HOME }}/{{ vpc_name }}'
+#        state: directory
+
+#    - name: "copy files to {{ vsi_jump_name }}.{{ dns_zone_name }}"
+#      ansible.builtin.copy:
+#        src: "{{ item }}"
+#        dest: '{{ ansible_env.HOME }}/{{ vpc_name }}' 
+#      with_fileglob:
+#        - "{{ dir_location }}/*{{ vpc_name }}*"
+
+
+
+    - name: Set facts for vCenter
+      ansible.builtin.set_fact:
+        esx_vcenter_password: "{{ lookup('file', '{{ dir_location }}/esx-vcenter-password.txt') }}"
+        vcenter_password: "{{ lookup('ansible.builtin.password', '{{ dir_location }}/vcenter-password.txt chars=ascii_letters,digits,punctuation length=15') }}"
+        esx_vcenter_host: "{{ lookup('file', '{{ dir_location }}/vcenter-hostname.txt') }}"
+        vcenter_ip: "{{ lookup('file', '{{ dir_location }}/vcenter-ip.txt') }}"
+        vcenter_datacenter: 'datacenter-{{ vpc_name }}'
+        vcenter_cluster: 'cluster-{{ vpc_name }}'
+        vcenter_dvs: 'dvs-{{ vpc_name }}'
+      no_log: true
+
+    - name: Creating a symlink for ISO
+      ansible.builtin.file:
+        src: "{{ isosrc }}/{{ vcenter_iso_name }}"
+        dest: '{{ dir_location }}/{{ vcenter_iso_name }}'
+        state: link
+      delegate_to: localhost
+
+    - name: 'Synchronization of files to  {{ vsi_jump_name }}'
+      ansible.posix.synchronize:
+        src: '{{ dir_location }}'
+        dest: '{{ ansible_env.HOME }}'
+        copy_links: true
+
+    - name: 'Mount ISO {{ vcenter_iso_name }}'
+      ansible.posix.mount:
+        path: '/media/'
+        src: '{{ ansible_env.HOME }}/{{ vpc_name }}/{{ vcenter_iso_name }}'
+        fstype: iso9660
+        opts: ro
+        state: mounted
+        boot: false
+
+
+    - name: execute ipg script
+      ansible.builtin.script: 'files/ipg.py {{ vpc_mgmt_ip }}'
+      register: vpc_gateway
+
+    - debug:
+        msg:
+          - '{{ vpc_gateway }}'
+
+    - name: Template files
+      ansible.builtin.template:
+        src: '{{ item.src }}'
+        dest: '{{ item.dst }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - { src: './templates/embedded_vCSA_on_ESXi.j2', dst: '{{ ansible_env.HOME }}/{{ vpc_name }}/embedded_vCSA_on_ESXi.json' }
+
+    - name: vCenter Exists
+      block:
+
+        - name: ESXi host is up that will host vcenter
+          ansible.builtin.command: 'timeout 300 bash -c "</dev/tcp/{{ esx_vcenter_host }}.{{ dns_zone_name }}/22"'
+          register: esxiup
+          failed_when: esxiup.rc > 0
+    
+        - name: vCenter is up
+          ansible.builtin.command: 'timeout 300 bash -c "</dev/tcp/{{ vcenter_ip }}/22"'
+          register: vcenterup
+          failed_when: vcenterup.rc > 0
+
+      rescue:
+        - name: Run a command to install vCenter onto ESXi host
+          ansible.builtin.command: '/media/vcsa-cli-installer/lin64/vcsa-deploy install --no-ssl-certificate-verification --accept-eula {{ ansible_env.HOME }}/{{ vpc_name }}/embedded_vCSA_on_ESXi.json'
+          register: vcenter_install
+          async: 7200
+          poll: 60
+          failed_when:
+            - vcenter_install.rc != 0
+            - '"Error message: The provided IP vcenter_ip is already in use" not in vcenter_install.stderr'
+
+        - debug:
+            msg:
+              - '{{ vcenter_install }}'
+
+
+    - name: vCenter Setup
+      block:
+        - name: Create Datacenter on vCenter
+          community.vmware.vmware_datacenter:
+            datacenter_name: '{{ vcenter_datacenter }}'
+            state: present
+    
+        - name: Create Cluster on vCenter
+          community.vmware.vmware_cluster:
+            datacenter_name: '{{ vcenter_datacenter }}'
+            cluster_name: '{{ vcenter_cluster }}'
+            state: present
+
+        - name: Add hosts to Datacenter/cluster on vCenter
+          community.vmware.vmware_host:
+            datacenter: '{{ vcenter_datacenter }}'
+            cluster: '{{ vcenter_cluster }}'
+            esxi_hostname:  "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}"
+            esxi_username: "{{ hostvars[item].ansible_user }}"
+            esxi_password: "{{ hostvars[item].ansible_password }}"
+            state: present
+          loop: '{{ groups["esxhosts"] }}'
+          no_log: true
+   
+        - name: Create DVS on vCenter
+          community.vmware.vmware_dvswitch:
+            datacenter_name: '{{ vcenter_datacenter }}'
+            switch: '{{ vcenter_dvs }}'
+            version: 7.0.0
+            uplink_quantity: 1
+            mtu: 9000
+            state: present
+
+        - name: Create DVS Port groups on vCenter
+          community.vmware.vmware_dvs_portgroup:
+            switch_name: '{{ vcenter_dvs }}'
+            portgroup_name: '{{ item.name }}'
+            port_binding: '{{ item.port_binding }}'
+            vlan_id: '{{ item.vlan }}'
+            state: present
+          loop:
+            - { name: dpg-management, vlan: '{{ bms_mgmt_vlan }}', port_binding: ephemeral }
+            - { name: dpg-vmk, vlan: "0", port_binding: static }
+            - { name: dpg-vmotion, vlan: '{{ bms_vmot_vlan }}', port_binding: static }
+            - { name: dpg-vsan, vlan: '{{ bms_vsan_vlan }}', port_binding: static }
+          loop_control:
+            pause: 3
+
+
+# not sure it is needed
+#
+#        - name: Add Host to dVS
+#          community.vmware.vmware_dvs_host:
+#            esxi_hostname:  "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}"
+#            switch_name: '{{ vcenter_dvs }}'
+#            state: present
+#          loop: '{{ groups["esxhosts"] }}'
+
+#        - name: Migrate Management vmk
+#          community.vmware.vmware_migrate_vmk:
+#            esxi_hostname: "esxhost-vmwareansible-01.vmwareansible.ibmcloud.local"
+#            device: "vmk0"
+#            current_switch_name: "vSwitch0"
+#            current_portgroup_name: "pg-mgmt"
+#            migrate_switch_name: "dvs-vmwareansible"
+#            migrate_portgroup_name: "dpg-vmk"
+
+# module does not work
+#        - name: Migrate Management vmk
+#          community.vmware.vmware_migrate_vmk:
+#            esxi_hostname: "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}"
+#            device: vmk0
+#            current_switch_name: vSwitch0
+#            current_portgroup_name: pg-mgmt
+#            migrate_switch_name: '{{ vcenter_dvs }}'
+#            migrate_portgroup_name: dpg-vmk
+#          loop: '{{ groups["esxhosts"] }}'
+#          when: my_idx != 0
+#          loop_control:
+#             index_var: my_idx 
+
+
+#    - name: Simple A record (IPV4 address) lookup for dns_zone_name
+#      ansible.builtin.debug:
+#        msg: 
+#          - "{{ ansible_architecture }}"
+#          - "{{ lookup('community.general.dig', dns_zone_name )}}"
+          
+      module_defaults:
+        group/vmware:
+          hostname: '{{ vcenter_ip }}'
+          username: 'Administrator@{{ dns_zone_name }}'
+          password: '{{ vcenter_password }}'
+          validate_certs: no
+      no_log: true
+
+
+    - name: vCenter run powershell
+      block:
+        - name: Run a script to move hosts from VSS to DVS vmk0
+          ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmk" "vmk0" "Management Network"'
+          args:
+            executable: /usr/bin/pwsh
+          register: vpc_movehost
+          loop: '{{ groups["esxhosts"] }}'
+          when: my_idx != 0
+          loop_control:
+             index_var: my_idx
+
+        - name: Print powershell info
+          ansible.builtin.debug:
+            msg: "psout : {{ vpc_movehost }}"
+
+
+        - name: Run a script to move hosts from VSS to DVS vmk1
+          ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmotion" "vmk1" "pg-vmon"'
+          args:
+            executable: /usr/bin/pwsh
+          register: vpc_movehost
+          loop: '{{ groups["esxhosts"] }}'
+          when: my_idx != 0
+          loop_control:
+             index_var: my_idx
+
+        - name: Print powershell info
+          ansible.builtin.debug:
+            msg: "psout : {{ vpc_movehost }}"
+
+        - name: Run a script to move vcenter to host 1 and to dvs
+          ansible.builtin.script: 'files/vpc_movevcenter.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-management" "pg-mgmt" "vcenter"'
+          args:
+            executable: /usr/bin/pwsh
+          register: vpc_movehost
+          loop: '{{ groups["esxhosts"] }}'
+          when: my_idx == 1
+          loop_control:
+             index_var: my_idx
+
+        - name: Print powershell info
+          ansible.builtin.debug:
+            msg: "psout : {{ vpc_movehost }}"
+
+        - name: Run a script to move host 0 from VSS to DVS vmk0
+          ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmk" "vmk0" "Management Network"'
+          args:
+            executable: /usr/bin/pwsh
+          register: vpc_movehost
+          loop: '{{ groups["esxhosts"] }}'
+          when: my_idx == 0
+          loop_control:
+             index_var: my_idx
+
+        - name: Print powershell info
+          ansible.builtin.debug:
+            msg: "psout : {{ vpc_movehost }}"
+
+        - name: Run a script to move host 0 from VSS to DVS vmk1
+          ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmotion" "vmk1" "pg-vmon"'
+          args:
+            executable: /usr/bin/pwsh
+          register: vpc_movehost
+          loop: '{{ groups["esxhosts"] }}'
+          when: my_idx == 0
+          loop_control:
+             index_var: my_idx
+
+        - name: Print powershell info
+          ansible.builtin.debug:
+            msg: "psout : {{ vpc_movehost }}"
+

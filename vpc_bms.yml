@@ -1,0 +1,174 @@
+- name: "Save existing VPC BMS {{ loop_bms }} info as fact"
+  ansible.builtin.set_fact:
+    cacheable: true
+    bare_metal_host_name: "{{ vpc_bms_name }}{{ '%02x' | format(loop_bms) }}"
+
+- name: VPC BMS
+  block:
+    - name: "Check VPC BMS {{ loop_bms }} ** {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server_info:
+        name: "{{ bare_metal_host_name }}"
+      failed_when:
+        - 'bare_metal_host_name not in vpc_bms_output.resource.name'
+      register: vpc_bms_output
+
+    - name: "Check on progress of {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server_info:
+        name: "{{ bare_metal_host_name }}"
+      until: '"running" in bms_state.resource.status'
+      retries: "{{ qretries }}"
+      delay: "{{ qdelay }}"
+      failed_when: '"failed" in bms_state.resource.status'
+      register: bms_state
+
+    - name: "Save existing VPC BMS {{ loop_bms }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "vpc_bms_{{ loop_bms }}": "{{ vpc_bms_output.resource }}"
+      when: vpc_bms_output.resource.id is defined
+
+  rescue:
+    - name: "Create BMS template {{ loop_bms }} ** {{ bare_metal_host_name }}"
+      ansible.builtin.template:
+        src: ./templates/esxhostname_esxi.j2
+        dest: "{{ dir_location }}/{{ bare_metal_host_name }}.config"
+
+    - name: "Create VPC BMS {{ loop_bms }} ** {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server:
+        vpc: "{{ vpc.id }}"
+        resource_group: "{{ resource_group.id }}"
+        name: "{{ bare_metal_host_name }}"
+        zone: "{{ vpc_zone_name }}"
+        profile: "{{ bms_profile }}"
+        image: "{{ image_dict[bms_image] }}"
+        user_data: "{{ lookup('file','{{ dir_location }}/{{ bare_metal_host_name }}.config') }}"  
+        keys:
+         - "{{ vpc_ssh_key.id }}"
+        primary_network_interface:
+         - subnet: "{{ vars['vpc_subnet_host'].id }}"
+           name: "{{ bms_interface_vmk0 }}"
+           security_groups: ["{{ vpc_security_group.id }}"]
+           allowed_vlans: "{{ bms_allowed_vlans }}"
+      register: vpc_bms_create_output
+      when: vars['vpc_bms_' + loop_bms | string ] is not defined
+      async: 9600
+      poll: 60 
+
+    - name: "Save existing VPC BMS {{ loop_bms }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "vpc_bms_{{ loop_bms }}": "{{ vpc_bms_create_output.resource }}"
+      when: vpc_bms_create_output.resource.id is defined
+
+    - name: "Check on progress of {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server_info:
+        name: "{{ bare_metal_host_name }}"
+      until: '"running" in bms_state.resource.status'
+      retries: "{{ qretries }}"
+      delay: "{{ qdelay }}"
+      failed_when: '"failed" in bms_state.resource.status'
+      register: bms_state
+
+  always:
+    - name: "Print VPC BMS info {{ loop_bms }}"
+      ansible.builtin.debug:
+        msg:
+          - "{{ vars['vpc_bms_' + loop_bms | string ] }}"
+
+    - name: "Get NIC info on BMS {{ loop_bms }} ** {{ bare_metal_host_name }}"
+      ibm_is_bare_metal_server_network_interface_info:
+        bare_metal_server: "{{ vars['vpc_bms_' + loop_bms | string ].id }}"
+        network_interface: "{{ vars['vpc_bms_' + loop_bms | string ].primary_network_interface[0].id }}"
+      register: bms_nics
+
+    - name: "Print VPC BMS NIC $$$$$ info {{ loop_bms }}"
+      ansible.builtin.debug:
+        msg:
+          - "{{ bms_nics }}"
+
+- name: "Retrieve creds on {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ibm_is_bare_metal_server_initialization_info:
+    bare_metal_server: "{{ vars['vpc_bms_' + loop_bms | string ].id }}"
+    private_key: "{{ lookup('file', '/{{ dir_location }}/{{ vpc_ssh_key_name }}') }}"
+  register: bms_init_info
+  no_log: true
+
+- name: "Save VPC BMS password info {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content: "{{ bms_init_info.resource.user_accounts[0].password }}"
+    dest: "{{ dir_location }}/{{ bare_metal_host_name }}-root-password.txt"
+  no_log: true
+
+- name: "*********** Save VPC BMS password info for vCenter esxhost password {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content: "{{ bms_init_info.resource.user_accounts[0].password }}"
+    dest: "{{ dir_location }}/esx-vcenter-password.txt"
+  no_log: true
+  when: loop_bms | int == 0
+
+- name: "*********** Save VPC BMS hostname info for vCenter {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content:  "{{ bare_metal_host_name }}"
+    dest: "{{ dir_location }}/vcenter-hostname.txt"
+#  no_log: true
+  when: loop_bms | int == 0
+
+- name: "*********** VPC BMS vmk interface vCenter"
+  include_tasks: vpc_bms_vmk.yml
+  with_nested:
+    - "{{ range(0, 0 + 1, 1) | list }}"
+    - "{{ _vmk }}"
+  vars:
+    _vmk:
+      - { name: "{{ bms_interface_vcenter }}", vlan: "{{ bms_mgmt_vlan }}", subnet: "{{ vars['vpc_subnet_mgmt'].id }}", float: "true" }
+  when: loop_bms | int == 0
+
+- name: "*********** DNS Record vCenter"
+  include_tasks: dns_record.yml
+  loop:
+    - { name: "{{ vcenter_name }}", type: "A", rdata: "{{ vars['vpc_bms_nic_' + bms_interface_vcenter | replace('-','_') | string ].primary_ip[0].address }}", zone_id: "{{ vars['dns_zone_' + dns_zone_name | replace('.','_')].zone_id }}", instance_id: "{{ dns_output.resource.guid }}" }
+  when: loop_bms | int == 0
+
+- name: "*********** Save VPC BMS vCenter Name {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content: "{{ vcenter_name }}.{{ dns_zone_name }}"
+    dest: "{{ dir_location }}/vcenter-name.txt"
+  when: loop_bms | int == 0
+
+- name: "*********** Save VPC BMS hostname ip for vCenter {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content: "{{ vars['vpc_bms_nic_' + bms_interface_vcenter | replace('-','_') | string ].primary_ip[0].address }}"
+    dest: "{{ dir_location }}/vcenter-ip.txt"
+  when: loop_bms | int == 0
+
+- name: "*********** Save VPC BMS User login for vCenter {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content: "Administrator@{{ dns_zone_name }}"
+    dest: "{{ dir_location }}/vcenter-username.txt"
+  when: loop_bms | int == 0
+
+- name: "Save VPC BMS management ip info {{ loop_bms }} ** {{ bare_metal_host_name }}"
+  ansible.builtin.copy:
+    content: "{{ vars['vpc_bms_' + loop_bms | string ].primary_network_interface[0].primary_ip[0].address }}" 
+    dest: "{{ dir_location }}/{{ bare_metal_host_name }}-{{ bms_interface_vmk0 }}-ip.txt"
+
+- name: "Add DNS Record {{ loop_bms }} ** {{ bare_metal_host_name }}" 
+  include_tasks: dns_record.yml
+  loop:
+    - { name: "{{ vars['vpc_bms_' + loop_bms | string ].name }}", type: "A", rdata: "{{ vars['vpc_bms_' + loop_bms | string ].primary_network_interface[0].primary_ip[0].address }}", zone_id: "{{ vars['dns_zone_' + dns_zone_name | replace('.','_')].zone_id }}", instance_id: "{{ dns_output.resource.guid }}" }
+
+- debug:
+    msg: 
+      - "{{ vsi_jump_name }}_ext"
+      - "{{ vsi_jump_ip.address }}"
+
+- name: Add a esx host alias
+  ansible.builtin.add_host:
+    hostname: "{{ vars['vpc_bms_' + loop_bms | string ].name }}"
+    ansible_host: "{{ vars['vpc_bms_' + loop_bms | string ].primary_network_interface[0].primary_ip[0].address }}"
+    ansible_ssh_private_key_file: "{{ dir_location }}/{{ vpc_ssh_key_name }}"
+    ansible_user: "root"
+    ansible_password: "{{ bms_init_info.resource.user_accounts[0].password }}" 
+    ansible_ssh_common_args: '-o ProxyCommand="ssh -oStrictHostKeyChecking=no -W %h:%p -q  -i {{ dir_location }}/{{ vpc_ssh_key_name }} root@{{ vsi_jump_ip.address }}"'
+    groups: "esxhosts"
+

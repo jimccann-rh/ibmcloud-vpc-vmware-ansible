@@ -1,0 +1,54 @@
+- name: DNS Zone
+  block:
+    - name: "Check DNS Zone {{ item }}"
+      ibm_dns_zones_info:
+        instance_id: "{{ dns_output.resource.guid }}"
+      register: dns_zone_output
+
+    - name: Set fact found to default false 
+      ansible.builtin.set_fact:
+        found: false
+
+    - name: Set fact found to true if dns zone is found
+      ansible.builtin.set_fact:
+        found: true
+      when: item in loop_zones.name
+      loop: "{{ dns_zone_output.resource.dns_zones }}"
+      loop_control:
+        loop_var: loop_zones
+
+    - name: Fail if dns zone is NOT found
+      ansible.builtin.fail:
+      when: not found|bool 
+
+    - name: "Save existing DNS Zone {{ item }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "dns_zone_{{ item | replace('.','_') }}": "{{ loop_zones }}"
+      when: 
+        - dns_zone_output.resource.id is defined 
+        - found|bool
+        - item in loop_zones.name
+      loop: "{{ dns_zone_output.resource.dns_zones }}"
+      loop_control:
+        loop_var: loop_zones
+
+  rescue:
+    - name: "Create DNS Zone {{ item }}"
+      ibm_dns_zone:
+        name: "{{ item }}"
+        instance_id: "{{ dns_output.resource.guid }}"
+      when: '"dns_zone_" +item'
+      register: dns_zone_create_output
+
+    - name: "Save existing DNS Zone {{ item }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "dns_zone_{{ item | replace('.','_') }}": "{{ dns_zone_create_output.resource }}"
+      when: dns_zone_create_output.resource.id is defined
+
+  always:
+    - name: "Print DNS Zone info {{ item }}"
+      ansible.builtin.debug:
+        msg:
+          - "{{ vars['dns_zone_' + item | replace('.','_')] }}"

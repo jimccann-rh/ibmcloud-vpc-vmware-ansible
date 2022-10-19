@@ -1,0 +1,57 @@
+- name: DNS Record
+  block:
+    - name: "Check DNS Record {{ item.name }}"
+      ibm_dns_resource_records_info:
+        instance_id: "{{ dns_output.resource.guid }}"
+        zone_id: "{{ item.zone_id }}"
+      register: dns_resource_records_output
+
+    - name: Set fact found to default false 
+      ansible.builtin.set_fact:
+        found: false
+
+    - name: Set fact found to true if dns record is found
+      ansible.builtin.set_fact:
+        found: true
+      when: item.name in loop_records.name
+      loop: "{{ dns_resource_records_output.resource.dns_resource_records }}"
+      loop_control:
+        loop_var: loop_records
+
+    - name: Fail if dns record is NOT found
+      ansible.builtin.fail:
+      when: not found|bool 
+
+    - name: "Save existing DNS Record {{ item.name }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "dns_record_{{ item.name | replace('-','_') }}": "{{ loop_records }}"
+      when: 
+        - dns_resource_records_output.resource.id is defined 
+        - found|bool
+        - item.name in loop_records.name
+      loop: "{{ dns_resource_records_output.resource.dns_resource_records }}"
+      loop_control:
+        loop_var: loop_records
+
+  rescue:
+    - name: "Create DNS Record {{ item.name }}"
+      ibm_dns_resource_record:
+        name: "{{ item.name }}"
+        instance_id: "{{ item.instance_id }}"
+        type: "{{ item.type }}"
+        zone_id: "{{ item.zone_id }}"
+        rdata: "{{ item.rdata }}"
+      register: dns_record_create_output
+
+    - name: "Save existing DNS Record {{ item.name }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        "dns_record_{{ item.name  | replace('-','_') }}": "{{ dns_record_create_output.resource }}"
+      when: dns_record_create_output.resource.id is defined
+
+  always:
+    - name: "Print DNS Record info {{ item.name }}"
+      ansible.builtin.debug:
+        msg:
+          - "{{ vars['dns_record_' + item.name | replace('-','_') ] }}"

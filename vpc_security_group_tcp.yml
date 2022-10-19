@@ -1,0 +1,40 @@
+- name: VPC Security Group
+  block:
+    - name: "Check VPC Security Group {{ item.protocol }}"
+      ibm_is_security_group_rule_info:
+        security_group: "{{ vpc_security_group.id }}"
+        security_group_rule: "{{ item.protocol }}"
+      failed_when:
+        - 'item.protocol not in vpc_security_group_output.resource.name'
+      register: vpc_security_group_rule_tcp_output
+
+    - name: "Save existing VPC Security Group {{ item.protocol }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        vpc_security_group_rule_tcp: "{{ vpc_security_group_rule_tcp_output.resource }}"
+      when: vpc_security_group_rule_tcp_output.resource.id is defined
+
+  rescue:
+    - name: "Create VPC Security Group {{ item.protocol }}"
+      ibm_is_security_group_rule:
+        group: "{{ vpc_security_group.id }}"
+        direction: "{{ item.direction }}"
+        remote: "{{ item.remote }}"
+        tcp:
+          - port_max: "{{ item.port_max }}" 
+            port_min: "{{ item.port_min }}"
+      register: vpc_security_group_rule_tcp_create_output
+      when: vpc_security_group_rule_tcp is not defined 
+
+    - name: "Save existing VPC Security Group {{ item.protocol }} info as fact"
+      ansible.builtin.set_fact:
+        cacheable: true
+        vpc_security_group_rule_tcp: "{{ vpc_security_group_output.resource }}"
+      when: vpc_security_group_rule_tcp_create_output.resource.id is defined
+
+  always:
+    - name: "Print VPC Security Group info {{ item.protocol }}"
+      ansible.builtin.debug:
+        msg:
+          - "VCP Security Group  : {{ vpc_security_group_rule_tcp }}"
+
