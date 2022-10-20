@@ -1,6 +1,6 @@
 dir_location: "/tmp/{{ vpc_name }}"
-resource_group_name: "VMwareAnsible2"
-vpc_name: "vmwareansible2"
+resource_group_name: "VMwareAnsible0"
+vpc_name: "vmwareansible0"
 vpc_region: "us-south"
 vpc_zone_name: "{{ vpc_region }}-3"
 vpc_prefix_cidr: "10.99.0.0/22"
@@ -33,7 +33,7 @@ bms_allowed_vlans: [100, 200, 300]
 bms_mgmt_vlan: "100"
 bms_vmot_vlan: "200"
 bms_vsan_vlan: "300"
-bms_count: 2
+bms_count: 1 
 bms_interface_vmk0: "pci-nic-vmnic0-vmk0"
 bms_interface_vmk1: "vlan-nic-vmotion-vmk1"
 bms_interface_vmk2: "vlan-nic-vsan-vmk2"

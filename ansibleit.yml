@@ -25,13 +25,14 @@
       ansible.builtin.set_fact:
         cacheable: true
         resource_group: "{{ rg_create_output.resource }}"
+#      when: rg_create_output is defined
       when: rg_create_output.resource.id is defined
 
     - name: Print Resource group info
       ansible.builtin.debug:
         msg: "Resource Group : {{ resource_group }}"
 
-
+#    - pause:
 
 #    - name: "Check {{ cos_name }} Exists"
 #      ibm_resource_instance:
@@ -269,6 +270,24 @@
             msg:
               - "VPC : {{ vpc_security_group }}"
 
+    - name: VPC Network Security Rule
+      include_tasks: 'vpc_security_group_{{ item.protocol}}.yml'
+      loop:
+#        - { protocol: "icmp", direction: "inbound", remote: "0.0.0.0/0" }
+        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 22, port_min: 22 }
+#        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 443, port_min: 443 }
+        - { protocol: "all", direction: "inbound", remote: "{{ vpc_prefix_cidr }}" }
+        - { protocol: "all", direction: "outbound", remote: "0.0.0.0/0" }
+#      loop_control:
+#        pause: 3
+
+      when: sg_inbound is not defined
+#          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
+
+
+#    - pause:
+
+
     - name: VPC Subnet
       include_tasks: vpc_subnet.yml
       loop:
@@ -356,7 +375,7 @@
         - name: Save newly created ssh pulbic key fact
           ansible.builtin.set_fact:
             cacheable: true
-            ssh_public_key: "{{ lookup('file', '/{{ dir_location }}/{{ vpc_ssh_key_name }}.pub') }}"
+            ssh_public_key: "{{ lookup('file', '{{ dir_location }}/{{ vpc_ssh_key_name }}.pub') }}"
           when: vpc_ssh_key_output is defined
 
         - name: Save existing SSH Key info as fact
@@ -374,7 +393,7 @@
         - name: Save newly created ssh pulbic key fact
           ansible.builtin.set_fact:
             cacheable: true
-            ssh_public_key: "{{ lookup('file', '/{{ dir_location }}/{{ vpc_ssh_key_name }}.pub') }}"
+            ssh_public_key: "{{ lookup('file', '{{ dir_location }}/{{ vpc_ssh_key_name }}.pub') }}"
           when: vpc_ssh_key is not defined
 
         - name: Configure SSH Key
@@ -527,14 +546,18 @@
  
         
 
-    - name: VPC Network Security Group
-      include_tasks: 'vpc_security_group_{{ item.protocol}}.yml'
-      loop:
-        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 22, port_min: 22 }
-        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 443, port_min: 443 }
-        - { protocol: "all", direction: "outbound", remote: "0.0.0.0/0" }
-      when: sg_inbound is not defined
-#          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
+#    - name: VPC Network Security Group
+#      include_tasks: 'vpc_security_group_{{ item.protocol}}.yml'
+#      loop:
+#        - { protocol: "icmp", direction: "inbound", remote: "0.0.0.0/0" }
+#        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 22, port_min: 22 }
+#        - { protocol: "tcp", direction: "inbound", remote: "0.0.0.0/0", port_max: 443, port_min: 443 }
+#        - { protocol: "all", direction: "outbound", remote: "0.0.0.0/0" }
+#      loop_control:
+#        pause: 3
+#
+#      when: sg_inbound is not defined
+##          when: vpc_sg_ri[0].rules is defined and vpc_sg_ri[0].rules | length > 0
 
     - name: "Check {{ dns_domain_name }} Exists"
       ibm_resource_instance:
@@ -765,6 +788,8 @@
     - name: Set facts for vCenter
       ansible.builtin.set_fact:
         esx_vcenter_password: "{{ lookup('file', '{{ dir_location }}/esx-vcenter-password.txt') }}"
+#        vcenter_password: "{{ lookup('ansible.builtin.password', '{{ dir_location }}/vcenter-password.txt length=15') }}"
+#        vcenter_password: "{{ lookup('ansible.builtin.password', '{{ dir_location }}/vcenter-password.txt chars=ascii_letters,digits length=12') +'#' }}"
         vcenter_password: "{{ lookup('ansible.builtin.password', '{{ dir_location }}/vcenter-password.txt chars=ascii_letters,digits,punctuation length=15') }}"
         esx_vcenter_host: "{{ lookup('file', '{{ dir_location }}/vcenter-hostname.txt') }}"
         vcenter_ip: "{{ lookup('file', '{{ dir_location }}/vcenter-ip.txt') }}"
@@ -785,6 +810,9 @@
         src: '{{ dir_location }}'
         dest: '{{ ansible_env.HOME }}'
         copy_links: true
+#        owner: true
+#        dest: '{{ ansible_env.HOME }}/{{ vpc_name }}'
+#        use_ssh_args: true
 
     - name: 'Mount ISO {{ vcenter_iso_name }}'
       ansible.posix.mount:
@@ -795,14 +823,48 @@
         state: mounted
         boot: false
 
+#    - name: Install and upgrade pip
+#      pip:
+#        name: pip
+#        extra_args: --upgrade
+#        executable: pip3
+#
+#
+#    - name: Install ipaddr python package
+#      ansible.builtin.pip:
+##        executable: pip3
+#        name: ipaddr
+##      delegate_to: localhost
+
+
+
 
     - name: execute ipg script
       ansible.builtin.script: 'files/ipg.py {{ vpc_mgmt_ip }}'
       register: vpc_gateway
 
+#    - name: IP info as fact
+#      ansible.builtin.set_fact:
+#        vpc_gateway: "{{ ipg.stdout }}"
+##        vpc_gateway: "{{ vpc_mgmt_ip | ansible.utils.ipaddr('net') | ansible.utils.ipaddr('1') }}"
+##        vpc_gateway: "{{ vpc_mgmt_ip | ipaddr('net') | ipaddr('1') }}"
+#      delegate_to: jumplist_external
+#
     - debug:
         msg:
           - '{{ vpc_gateway }}'
+#          - '{{ vpc_gateway.stdout_lines }}'
+#          '{{ ipg.stdout_lines }}'
+
+
+#    - name: 'Set fact for vCenter'
+#      ansible.builtin.set_fact:
+#        esx_vcenter_password: "{{ lookup('file', '{{ dir_location }}/esx-vcenter-password.txt') }}"
+##        vcenter_password: "{{ lookup('file', '{{ dir_location }}/vcenter-password.txt') }}"
+#        vcenter_password: "{{ lookup('ansible.builtin.password', '{{ dir_location }}/vcenter-password.txt', seed=inventory_hostname) }}"
+#        esx_vcenter_host: "{{ lookup('file', '{{ dir_location }}/vcenter-hostname.txt') }}"
+#        vcenter_ip: "{{ lookup('file', '{{ dir_location }}/vcenter-ip.txt') }}"
+#      no_log: true
 
     - name: Template files
       ansible.builtin.template:
