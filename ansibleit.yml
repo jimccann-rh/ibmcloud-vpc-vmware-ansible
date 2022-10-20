@@ -726,7 +726,7 @@
         msg: "{{ _vmotion }}"
       loop: '{{ groups["esxhosts"] }}'
       vars:
-        _vmotion: "{{ lookup('file', '{{ dir_location }}/{{ hostvars[item].inventory_hostname }}-vlan-nic-vmotion-vmk2-ip.txt') }}"
+        _vmotion: "{{ lookup('file', '{{ dir_location }}/{{ hostvars[item].inventory_hostname }}-vlan-nic-vmotion-vmk1-ip.txt') }}"
  
     - name: 'Add vMotion vmkernel port with vMotion TCP/IP stack'
       community.vmware.vmware_vmkernel:
@@ -747,7 +747,7 @@
         validate_certs: no
       loop: '{{ groups["esxhosts"] }}'
       vars:
-        _vmotion: "{{ lookup('file', '{{ dir_location }}/{{ hostvars[item].inventory_hostname }}-vlan-nic-vmotion-vmk2-ip.txt') }}"
+        _vmotion: "{{ lookup('file', '{{ dir_location }}/{{ hostvars[item].inventory_hostname }}-vlan-nic-vmotion-vmk1-ip.txt') }}"
       no_log: true
 
     - name: Is powercli installed?
