@@ -618,6 +618,16 @@
         - { name: "{{ vsi_jump_name }}", ip: "{{ vsi_jump.primary_network_interface[0].primary_ipv4_address }}", network: "internal" }
 
 
+    - name: Template file
+      ansible.builtin.template:
+        src: '{{ item.src }}'
+        dest: '{{ item.dst }}'
+        mode: '0744'
+      loop:
+        - { src: './templates/sshuttlevcenter.j2', dst: '{{ dir_location }}/sshuttlevcenter.sh' }
+      delegate_to: localhost
+
+
 
 - name: IBMC VPC esx
   hosts: esxhosts

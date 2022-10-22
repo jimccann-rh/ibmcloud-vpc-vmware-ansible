@@ -1,0 +1,1 @@
+sshuttle -e 'ssh -i "{{ dir_location }}/{{ vpc_ssh_key_name }}"' -r root@"{{ vsi_jump_ip.address }}" "{{ vpc_prefix_cidr }}"

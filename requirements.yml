@@ -1,0 +1,6 @@
+collections:
+  - name: community.general
+
+  - name: git@github.com:jimccann-rh/ansible-collection-ibm.git
+    type: git
+
