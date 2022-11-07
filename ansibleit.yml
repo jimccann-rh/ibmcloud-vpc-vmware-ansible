@@ -1013,7 +1013,7 @@
       no_log: true
 
 
-    - name: vCenter run powershell
+    - name: vCenter run powershell move hosts VSS to DVS
       block:
         - name: Run a script to move hosts from VSS to DVS vmk0
           ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmk" "vmk0" "Management Network"'
@@ -1028,8 +1028,6 @@
         - name: Print powershell info
           ansible.builtin.debug:
             msg: "psout : {{ vpc_movehost }}"
-          when: my_idx != 0
-
 
         - name: Run a script to move hosts from VSS to DVS vmk1
           ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmotion" "vmk1" "pg-vmon"'
@@ -1044,13 +1042,17 @@
         - name: Print powershell info
           ansible.builtin.debug:
             msg: "psout : {{ vpc_movehost }}"
-          when: my_idx != 0
+
+      when: bms_count >= 1
+
+    - name: vCenter run powershell move vCenter to host 1
+      block:
 
         - name: Run a script to move vcenter to host 1 and to dvs
           ansible.builtin.script: 'files/vpc_movevcenter.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-management" "pg-mgmt" "vcenter"'
           args:
             executable: /usr/bin/pwsh
-          register: vpc_movehost
+          register: vpc_movehost1_vc
           loop: '{{ groups["esxhosts"] }}'
           when: my_idx == 1
           loop_control:
@@ -1058,36 +1060,40 @@
 
         - name: Print powershell info
           ansible.builtin.debug:
-            msg: "psout : {{ vpc_movehost }}"
-          when: my_idx == 1
+            msg: "psout : {{ vpc_movehost1_vc }}"
+
+      when: bms_count >= 1
+
+
+    - name: vCenter run powershell move host 0 VSS to DVS
+      block:
 
         - name: Run a script to move host 0 from VSS to DVS vmk0
           ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmk" "vmk0" "Management Network"'
           args:
             executable: /usr/bin/pwsh
-          register: vpc_movehost
+          register: vpc_movehost0_vmk0
           loop: '{{ groups["esxhosts"] }}'
-          when: my_idx == 0 and bms_count >= 1
+          when: my_idx == 0
           loop_control:
              index_var: my_idx
 
         - name: Print powershell info
           ansible.builtin.debug:
-            msg: "psout : {{ vpc_movehost }}"
-          when: my_idx == 0 and bms_count >= 1
+            msg: "psout : {{ vpc_movehost0_vmk0 }}"
 
         - name: Run a script to move host 0 from VSS to DVS vmk1
           ansible.builtin.script: 'files/vpc_movehost-vss2vds.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-vmotion" "vmk1" "pg-vmon"'
           args:
             executable: /usr/bin/pwsh
-          register: vpc_movehost
+          register: vpc_movehost0_vmk1
           loop: '{{ groups["esxhosts"] }}'
-          when: my_idx == 0 and bms_count >= 1
+          when: my_idx == 0
           loop_control:
              index_var: my_idx
 
         - name: Print powershell info
           ansible.builtin.debug:
             msg: "psout : {{ vpc_movehost }}"
-          when: my_idx == 0 and bms_count >= 1
+      when: bms_count >= 1
 
