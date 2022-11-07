@@ -18,7 +18,7 @@
     - name: "Create VPC Network ACL Rule {{ item }}"
       ibm_is_network_acl_rule:
         network_acl: "{{ vpc_network_acl.id }}"
-#        id: "{{ resource_group.id }}"
+        id: "{{ resource_group.id }}"
         name: "{{ vpc_network_acl_name }}-rule-all-{{ item }}"
         action: allow
         direction: "{{ item }}"

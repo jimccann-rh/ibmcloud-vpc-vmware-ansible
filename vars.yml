@@ -1,4 +1,4 @@
-dir_location: "/tmp/{{ vpc_name }}"
+dir_location: "/home/jimb0/tmp/{{ vpc_name }}"
 resource_group_name: "VMwareAnsible0"
 vpc_name: "vmwareansible0"
 vpc_region: "us-south"
