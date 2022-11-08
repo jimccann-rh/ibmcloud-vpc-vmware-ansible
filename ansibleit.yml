@@ -1048,8 +1048,8 @@
     - name: vCenter run powershell move vCenter to host 1
       block:
 
-        - name: Run a script to move vcenter to host 1 and to dvs
-          ansible.builtin.script: 'files/vpc_movevcenter.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" "dpg-management" "pg-mgmt" "vcenter"'
+        - name: Run a script to move vCenter to host 1 and to dvs
+          ansible.builtin.script: 'files/vpc_movevcenter.ps1 "{{ hostvars[item].inventory_hostname }}.{{ dns_zone_name }}" "{{ vcenter_name }}.{{ dns_zone_name }}"  "{{ vpc_name }}" "{{ vcenter_dvs }}" dpg-management pg-mgmt vcenter'
           args:
             executable: /usr/bin/pwsh
           register: vpc_movehost1_vc
@@ -1065,7 +1065,7 @@
       when: bms_count >= 1
 
 
-    - name: vCenter run powershell move host 0 VSS to DVS
+    - name: Run powershell move host 0 VSS to DVS
       block:
 
         - name: Run a script to move host 0 from VSS to DVS vmk0

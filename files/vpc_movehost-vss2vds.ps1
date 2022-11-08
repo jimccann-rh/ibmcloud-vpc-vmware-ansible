@@ -162,4 +162,4 @@ Function Invoke-MigratevSS2vDS {
 
 Invoke-MigratevSS2vDS -VMhost $VMhost -MgmtvDS $vcenter_dvs -MgmtvDSPG $vcenter_dvs_dpg -WarningAction SilentlyContinue -ErrorAction Continue
 
-Start-Sleep -Seconds 15
+Start-Sleep -Seconds 60
